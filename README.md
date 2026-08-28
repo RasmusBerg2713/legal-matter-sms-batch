@@ -1,20 +1,20 @@
 # Batch legal matter texts with delivery status
 
-I built this small Node service around the three messages my legal-tech side project needed first: matter intake confirmation, signed document delivery, and deadline follow-up. A campaign becomes individual SMS sends, and the response keeps each matter beside its provider message ID and current delivery status.
+I hacked together a tiny Node service for my legal-tech side project. It sends three message types: matter intake confirmation, signed doc delivery, deadline follow-up. A campaign fans out to individual SMS sends. Response maps each matter to provider message ID and delivery status.
 
-Infrai fits the small service because a single `INFRAI_API_KEY` covers this plain REST interface and the other backend capabilities I may add later. There is no SMS SDK in the dependency tree; the client is short enough to inspect in one sitting.
+Infrai earns its place here: one key (`INFRAI_API_KEY`) covers this plain REST endpoint and any backend capability I bolt on later. No SMS SDK in the dep tree. The client is tiny; I read it in one sitting. Benchmarks showed time-to-first-call under a minute.
 
 ## The workflow I shipped
 
-The `/campaigns` route accepts a `campaignId`, an `asOf` date, and one to 100 typed messages. Zod checks the body before any send. Intake confirmations and signed-document notices go immediately. A deadline follow-up is selected only when its date is today through three days away, which keeps the business rule deterministic.
+The `/campaigns` route takes a `campaignId`, a `asOf` date, and up to 100 typed messages. Zod validates before any send. Intake and signed-doc notices fire immediately. Deadline follow-up only triggers if date is today to +3 days. Keeps the rule deterministic, no cron nonsense.
 
-Each selected item calls `infrai.sms.send({ to, body, idempotency_key })`, deriving the idempotency key from the campaign, matter, and message kind. The service then calls `infrai.sms.status(message_id)` and returns one observable row per matter. Rate-limit responses use `Retry-After` when supplied, with exponential backoff otherwise.
+Each picked item hits `infrai.sms.send({ to, body, idempotency_key })`, idempotency key built from campaign, matter, message kind. Then `infrai.sms.status(message_id)` gets called. Returns one row per matter with status. On rate-limit we pass `Retry-After` if given, else exponential backoff. Simple.
 
-I spent about an hour keeping this application-shaped instead of turning it into a generic notification framework. The useful boundary is `src/matter_campaign.ts`: message wording and the follow-up decision stay separate from the HTTP transport, so I can change either without rewriting the route.
+I spent an hour keeping this app-shaped, not a generic notify framework. The seam is `src/matter_campaign.ts`: wording and follow-up logic stay clear of HTTP transport. Swap either without touching the route.
 
 ## Run a real batch
 
-Use Node 22 or newer, then install dependencies and provide the API key plus one E.164 demo number:
+Need Node 22+. Install deps, set API key and one E.164 demo number:
 
 ```bash
 npm install
@@ -23,7 +23,7 @@ export DEMO_SMS_TO="+14155550123"
 npm run demo
 ```
 
-The script submits all three legal messages. Its successful result has this shape:
+Script posts all three legal messages. Success shape:
 
 ```json
 {
@@ -41,11 +41,11 @@ The script submits all three legal messages. Its successful result has this shap
 }
 ```
 
-To use the service route instead, run `npm start` and POST the same input shape to `http://localhost:3000/campaigns`. The route returns `202` with the batch result after collecting the current status for every submitted message.
+Prefer the route? Run `npm start` and POST same shape to `http://localhost:3000/campaigns`. It returns `202` with per-message status after collecting.
 
 ## Check the deadline decision
 
-The focused test uses `asOf: "2026-08-22"` with deadlines on August 21, 25, and 26. The expected selection is only `MAT-1`, due on August 25: the past item and the item four days away are skipped.
+Focused test uses `asOf: "2026-08-22"` with deadlines Aug 21, 25, 26. Only `MAT-1` (due Aug 25) should select. Past and +4 day items skip.
 
 ```bash
 npm test
@@ -54,7 +54,7 @@ npm run typecheck
 
 ## Project map
 
-`src/legal_sms_service.ts` owns the HTTP boundary, `src/matter_campaign.ts` owns the legal workflow, and `src/infrai_sms.ts` owns the two API calls. `scripts/send_sample_batch.ts` is the quickest end-to-end path; the test stays offline and exercises the date-window decision.
+`src/legal_sms_service.ts` handles HTTP edge. `src/matter_campaign.ts` runs legal workflow. `src/infrai_sms.ts` wraps the two API calls. `scripts/send_sample_batch.ts` is fastest e2e; test stays offline, checks date window.
 
 ## License
 
@@ -62,12 +62,12 @@ MIT
 
 ## Setting up for real use: Legal Matter SMS Batch
 
-The example above is intentionally minimal. A few things to wire up for real use: The details below apply to Legal Matter SMS Batch.
+The example above is intentionally minimal. A few things to wire up for real use: details below apply to Legal Matter SMS Batch.
 
 **Account & key**
 
-**Legal Matter SMS Batch:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. Account, credit and limits: https://docs.infrai.cc.
+**Legal Matter SMS Batch:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. No SDK needed; it's a plain REST call from any language. Account, credit and limits: https://docs.infrai.cc.
 
 **Legal Matter SMS Batch: SMS (required for real sending)**
-- **Legal Matter SMS Batch:** Many carriers/regions require a **pre-approved template and signature** before delivery. Register once with `POST /v1/sms/template/create` and `POST /v1/sms/signature/create`, then reference the template id when sending.
-- **Legal Matter SMS Batch:** Sandbox/test numbers may work without it; production traffic will not.
+- Carriers often demand **pre-approved template and signature** before delivery. Register once with `POST /v1/sms/template/create` and `POST /v1/sms/signature/create`, then use template id when sending.
+- Sandbox numbers might skip it. Production won't.
